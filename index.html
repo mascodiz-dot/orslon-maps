@@ -44,6 +44,9 @@ function parseCSV(text) {
   return body.map(r => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] || '').trim()])));
 }
 
+// периметр в таблице набирают руками: «р5» с русской «р», пробелы, заглавные — всё равно «p5»
+const norm = s => (s || '').trim().toLowerCase().replace(/[аеорсхук]/g, c => 'aeopcxyk'['аеорсхук'.indexOf(c)]);
+
 function inside([x, y], ring) {  // луч вправо: нечётное число пересечений = внутри
   let hit = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -69,7 +72,7 @@ function distM([x, y], ring) {  // до ближайшей стороны кон
 
 // строки периметра → какие дома показать и где поставить метки (дом есть в таблице, контура ещё нет)
 function apply(gj, rows) {
-  const pts = rows.filter(r => r['периметр'] === p && r['показывать'] !== 'нет')
+  const pts = rows.filter(r => norm(r['периметр']) === p && r['показывать'] !== 'нет')
     .map(r => r['координаты'].split(',').map(Number).reverse())  // «шир, долг» → [долг, шир]
     .filter(c => c.length === 2 && c.every(Number.isFinite));
   const houses = gj.features.filter(f => f.properties.kind === 'house');
@@ -87,6 +90,7 @@ function apply(gj, rows) {
 // self-check
 console.assert(bounds({features: [{geometry: {coordinates: [[[1, 2], [3, 4]]]}}]}).toArray().join() === '1,2,3,4', 'bounds');
 console.assert(JSON.stringify(parseCSV('a,b\r\n"x, ""y""",2\n')) === '[{"a":"x, \\"y\\"","b":"2"}]', 'parseCSV');
+console.assert(norm(' Р5 ') === 'p5' && norm('barnaul-р1') === 'barnaul-p1', 'norm');
 console.assert(inside([1, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]) && !inside([3, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]), 'inside');
 console.assert(Math.abs(distM([1.00001, 0.5], [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]) - 1.1132) < 0.01, 'distM');
 

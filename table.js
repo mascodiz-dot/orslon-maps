@@ -20,7 +20,9 @@
     return body.map(r => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] || '').trim()])));
   }
 
-  const pick = (rows, per) => rows.filter(r => r['периметр'] === per && r['показывать'] !== 'нет' && r['адрес']);
+  // периметр в таблице набирают руками: «р5» с русской «р», пробелы, заглавные — всё равно «p5»
+  const norm = s => (s || '').trim().toLowerCase().replace(/[аеорсхук]/g, c => 'aeopcxyk'['аеорсхук'.indexOf(c)]);
+  const pick = (rows, per) => rows.filter(r => norm(r['периметр']) === per && r['показывать'] !== 'нет' && r['адрес']);
   const total = rows => rows.reduce((s, r) => s + (parseInt(r['подъездов'], 10) || 0), 0);
 
   // класс .slon-total в Tilda ставится на весь текстовый блок «Подъездов: 83» — меняем только последнее число,
@@ -37,8 +39,8 @@
   // self-check
   console.assert(setNum('Подъездов: 83', 90) === 'Подъездов: 90' && setNum('83', 7) === '7' &&
     setNum('Подъездов:', 5) === 'Подъездов:', 'table.js setNum');
-  const t = pick(parseCSV('периметр,адрес,подъездов,показывать\np5,"А, 1",3,да\np5,Б 2,4,нет\np1,В 3,5,да\np5,Г 4,x,да\n'), 'p5');
-  console.assert(t.length === 2 && t[0]['адрес'] === 'А, 1' && total(t) === 3, 'table.js pick/total');
+  const t = pick(parseCSV('периметр,адрес,подъездов,показывать\np5,"А, 1",3,да\np5,Б 2,4,нет\np1,В 3,5,да\np5,Г 4,x,да\n Р5,Д 5,2,да\n'), 'p5');
+  console.assert(t.length === 3 && t[0]['адрес'] === 'А, 1' && total(t) === 5, 'table.js pick/total');
 
   const style = document.createElement('style');
   style.textContent = '.slon-t{width:100%;border-collapse:collapse;font:16px/1.4 inherit}' +
