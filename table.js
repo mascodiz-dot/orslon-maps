@@ -23,7 +23,20 @@
   const pick = (rows, per) => rows.filter(r => r['периметр'] === per && r['показывать'] !== 'нет' && r['адрес']);
   const total = rows => rows.reduce((s, r) => s + (parseInt(r['подъездов'], 10) || 0), 0);
 
+  // класс .slon-total в Tilda ставится на весь текстовый блок «Подъездов: 83» — меняем только последнее число,
+  // разметку Tilda и подпись не трогаем
+  const LAST_NUM = /\d+(?!.*\d)/s;
+  const setNum = (s, n) => s.replace(LAST_NUM, n);
+  function setTotal(el, n) {
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let last = null;
+    while (w.nextNode()) if (/\d/.test(w.currentNode.nodeValue)) last = w.currentNode;
+    if (last) last.nodeValue = setNum(last.nodeValue, n);
+  }
+
   // self-check
+  console.assert(setNum('Подъездов: 83', 90) === 'Подъездов: 90' && setNum('83', 7) === '7' &&
+    setNum('Подъездов:', 5) === 'Подъездов:', 'table.js setNum');
   const t = pick(parseCSV('периметр,адрес,подъездов,показывать\np5,"А, 1",3,да\np5,Б 2,4,нет\np1,В 3,5,да\np5,Г 4,x,да\n'), 'p5');
   console.assert(t.length === 2 && t[0]['адрес'] === 'А, 1' && total(t) === 3, 'table.js pick/total');
 
@@ -53,7 +66,7 @@
       .then(text => {
         const rows = pick(parseCSV(text), p);
         boxes.forEach(b => render(b, rows));
-        document.querySelectorAll('.slon-total').forEach(s => { s.textContent = total(rows); });
+        document.querySelectorAll('.slon-total').forEach(el => setTotal(el, total(rows)));
       })
       .catch(fail);
   }
