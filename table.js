@@ -44,8 +44,11 @@
 
   const style = document.createElement('style');
   // значения сняты с оригинального блока T431 на живой странице p5
-  style.textContent = '.slon-t{width:100%;max-width:600px;margin:0 auto;border-collapse:separate;border-spacing:0;' +
-    'font:16px/24.8px TildaSans,Arial,sans-serif;table-layout:fixed}' +
+  // ширина — доля ширины экрана (vw): компьютер 70vw, телефон (≤640px) весь экран минус поля по 10px.
+  // Центр держим через left:50% + translateX, чтобы таблица была по центру экрана, даже если блок Tilda уже неё
+  style.textContent = '.slon-t{width:70vw;position:relative;left:50%;transform:translateX(-50%);' +
+    'border-collapse:separate;border-spacing:0;font:16px/24.8px TildaSans,Arial,sans-serif;table-layout:fixed}' +
+    '@media(max-width:640px){.slon-t{width:calc(100vw - 20px)}}' +
     '.slon-t th,.slon-t td{box-sizing:border-box;padding:20px 10px;text-align:left}' +
     '.slon-t th{font-weight:700;color:#fc511f;border-bottom:1px solid #000}' +
     '.slon-t td{font-weight:300;color:#4d4c4c;border-bottom:1px solid #d9d9d9}' +
