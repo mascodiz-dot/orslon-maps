@@ -43,10 +43,14 @@
   console.assert(t.length === 3 && t[0]['адрес'] === 'А, 1' && total(t) === 5, 'table.js pick/total');
 
   const style = document.createElement('style');
-  style.textContent = '.slon-t{width:100%;border-collapse:collapse;font:16px/1.4 inherit}' +
-    '.slon-t th,.slon-t td{padding:10px 14px;border-bottom:1px solid #e5e5e5;text-align:left}' +
-    '.slon-t th{background:#e6761b;color:#fff;font-weight:600}' +
-    '.slon-t td:last-child,.slon-t th:last-child{text-align:center;width:40%}';
+  // значения сняты с оригинального блока T431 на живой странице p5
+  style.textContent = '.slon-t{width:100%;max-width:600px;margin:0 auto;border-collapse:separate;border-spacing:0;' +
+    'font:16px/24.8px TildaSans,Arial,sans-serif;table-layout:fixed}' +
+    '.slon-t th,.slon-t td{box-sizing:border-box;padding:20px 10px;text-align:left}' +
+    '.slon-t th{font-weight:700;color:#fc511f;border-bottom:1px solid #000}' +
+    '.slon-t td{font-weight:300;color:#4d4c4c;border-bottom:1px solid #d9d9d9}' +
+    '.slon-t tbody tr:nth-child(odd){background:#fff}.slon-t tbody tr:nth-child(even){background:#eee}' +
+    '.slon-t td:last-child,.slon-t th:last-child{text-align:center;width:37.5%}';
   document.head.appendChild(style);
 
   function render(box, rows) {
