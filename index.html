@@ -16,7 +16,7 @@
 <div id="map"></div>
 <div id="msg" role="alert"></div>
 <script>
-// shortcut: OpenFreeMap без ключа, перейти на MapTiler когда ключ будет в «доступах»
+// OpenFreeMap: подложка без API-ключа.
 const STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 const CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS4KJwO3SevXXouRnOvZ_mKdCp1jMYBmJIg2m67uZtR1Y9m0D7hYnuTGjBoGg-FHNVlf2Gqj1Egl-7E/pub?gid=0&single=true&output=csv';
 const p = new URLSearchParams(location.search).get('p') || '';
@@ -91,13 +91,29 @@ function apply(gj, rows) {
 }
 
 // только номер дома: «Островского 21/Г.Исакова 228 (мин.п.№2,6,7,8)» → «21/228», «Г. Исакова 206а» → «206а»
-const houseNum = a => (a || '').replace(/\(.*?\)/g, '').split('/')
-  .map(s => (s.trim().match(/(\d+\s*[а-яёa-z]?)\s*$/i) || [])[1]).filter(Boolean).map(s => s.replace(/\s/g, '')).join('/');
+const houseNum = a => (a || '').replace(/\(.*?\)/g, '').replace(/(\d+)\s*,?\s*к[.,]?\s*(\d+)/gi, '$1к$2').split('/')
+  .map(s => (s.trim().match(/(\d+\s*[а-яёa-z]?(?:\s*к\s*\d+)?)\s*$/i) || [])[1]).filter(Boolean).map(s => s.replace(/\s/g, '')).join('/');
 
-// shortcut: среднее вершин, у Г-образного дома точка может уйти за контур; заменить на polylabel, если такие появятся
+// Среднее вершин; для вогнутого дома выбираем внутреннюю точку с запасом до стен.
 function centroid(ring) {
   const v = ring.slice(0, -1);
-  return [v.reduce((s, c) => s + c[0], 0) / v.length, v.reduce((s, c) => s + c[1], 0) / v.length];
+  const mean = [v.reduce((s, c) => s + c[0], 0) / v.length, v.reduce((s, c) => s + c[1], 0) / v.length];
+  if (inside(mean, ring)) return mean;
+  const ys = [...new Set(v.map(c => c[1]))].sort((a, b) => a - b);
+  let best = mean, clearance = -1;
+  for (let k = 1; k < ys.length; k++) {
+    const y = (ys[k - 1] + ys[k]) / 2, xs = [];
+    for (let i = 1; i < ring.length; i++) {
+      const [ax, ay] = ring[i - 1], [bx, by] = ring[i];
+      if ((ay > y) !== (by > y)) xs.push(ax + (y - ay) * (bx - ax) / (by - ay));
+    }
+    xs.sort((a, b) => a - b);
+    for (let j = 1; j < xs.length; j += 2) {
+      const c = [(xs[j - 1] + xs[j]) / 2, y], d = distM(c, ring);
+      if (d > clearance && inside(c, ring)) { best = c; clearance = d; }
+    }
+  }
+  return best;
 }
 
 // self-check
@@ -108,6 +124,7 @@ console.assert(houseNum('Г. Исакова 206а') === '206а' && houseNum('О�
   houseNum('Юрина 257/ Островского 13') === '257/13' && houseNum('Малахова 48/ Юрина 227') === '48/227' && houseNum('Юрина 253') === '253' &&
   houseNum('') === '', 'houseNum');
 console.assert(centroid([[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]).join() === '1,1', 'centroid');
+console.assert(houseNum('Анатолия 90,к.1') === '90к1' && houseNum('Кащеевой 17к1') === '17к1', 'houseNum corpus');
 console.assert(inside([1, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]) && !inside([3, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]), 'inside');
 console.assert(Math.abs(distM([1.00001, 0.5], [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]) - 1.1132) < 0.01, 'distM');
 
