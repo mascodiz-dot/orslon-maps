@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта периметра</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  html, body, #map { margin: 0; height: 100%; }
+  #msg { position: absolute; top: 12px; left: 12px; right: 12px; padding: 10px 14px; background: #fff;
+         border-radius: 8px; font: 15px/1.4 system-ui, sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,.2); display: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="msg" role="alert"></div>
+<script>
+// OpenFreeMap: подложка без API-ключа.
+const STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS4KJwO3SevXXouRnOvZ_mKdCp1jMYBmJIg2m67uZtR1Y9m0D7hYnuTGjBoGg-FHNVlf2Gqj1Egl-7E/pub?gid=0&single=true&output=csv';
+const p = new URLSearchParams(location.search).get('p') || '';
+const msg = t => { const el = document.getElementById('msg'); el.textContent = t; el.style.display = 'block'; };
+
+function bounds(gj) {
+  const b = new maplibregl.LngLatBounds();
+  for (const f of gj.features) for (const ring of f.geometry.coordinates) for (const c of ring) b.extend(c);
+  return b;
+}
+
+// CSV из Google: поля в кавычках могут содержать запятые и "" внутри
+function parseCSV(text) {
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c !== '"') f += c; else if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+    else if (c !== '\r') f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  const [head = [], ...body] = rows;
+  return body.map(r => Object.fromEntries(head.map((h, i) => [h.trim(), (r[i] || '').trim()])));
+}
+
+// периметр в таблице набирают руками: «р5» с русской «р», пробелы, заглавные — всё равно «p5»
+const norm = s => (s || '').trim().toLowerCase().replace(/[аеорсхук]/g, c => 'aeopcxyk'['аеорсхук'.indexOf(c)]);
+
+function inside([x, y], ring) {  // луч вправо: нечётное число пересечений = внутри
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+const TOL_M = 5;  // точка из Яндекса ложится на 1–3 м мимо контура OSM
+
+function distM([x, y], ring) {  // до ближайшей стороны контура, метры
+  const k = Math.cos(y * Math.PI / 180);
+  let best = Infinity;
+  for (let i = 1; i < ring.length; i++) {
+    const ax = (ring[i-1][0] - x) * k, ay = ring[i-1][1] - y;
+    const dx = (ring[i][0] - ring[i-1][0]) * k, dy = ring[i][1] - ring[i-1][1];
+    const len = dx*dx + dy*dy, t = len ? Math.max(0, Math.min(1, -(ax*dx + ay*dy) / len)) : 0;
+    best = Math.min(best, Math.hypot(ax + t*dx, ay + t*dy));
+  }
+  return best * 111320;
+}
+
+// строки периметра → какие дома показать и где поставить метки (дом есть в таблице, контура ещё нет)
+function apply(gj, rows) {
+  const rs = rows.filter(r => norm(r['периметр']) === p && r['показывать'] !== 'нет')
+    .map(r => ({ c: r['координаты'].split(',').map(Number).reverse(), num: houseNum(r['адрес']) }))  // «шир, долг» → [долг, шир]
+    .filter(r => r.c.length === 2 && r.c.every(Number.isFinite));
+  const pts = rs.map(r => r.c);
+  const houses = gj.features.filter(f => f.properties.kind === 'house' && !f.properties.parent_osm_way);
+  const ring = h => h.geometry.coordinates[0];
+  const houseOf = pt => houses.find(h => inside(pt, ring(h))) ||
+    houses.map(h => [distM(pt, ring(h)), h]).filter(([d]) => d <= TOL_M).sort((a, b) => a[0] - b[0]).map(([, h]) => h)[0];
+  const own = pts.map(houseOf);
+  const selectedIds = new Set(own.filter(Boolean).map(h => h.properties.osm_way).filter(Boolean));
+  const pt = c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: {} });
+  return {
+    area: { ...gj, features: gj.features.filter(f => f.properties.kind !== 'house' || own.includes(f) || selectedIds.has(f.properties.parent_osm_way)) },
+    marks: { type: 'FeatureCollection', features: pts.filter((_, i) => !own[i]).map(pt) },
+    // номер в центре контура; нет контура — у самой метки
+    labels: { type: 'FeatureCollection', features: rs.map((r, i) => ({ ...pt(own[i] ? centroid(ring(own[i])) : r.c), properties: { num: r.num } })) },
+  };
+}
+
+// только номер дома: «Островского 21/Г.Исакова 228 (мин.п.№2,6,7,8)» → «21/228», «Г. Исакова 206а» → «206а»
+const houseNum = a => (a || '').replace(/\(.*?\)/g, '').replace(/(\d+)\s*,?\s*к[.,]?\s*(\d+)/gi, '$1к$2').split('/')
+  .map(s => (s.trim().match(/(\d+\s*[а-яёa-z]?(?:\s*к\s*\d+)?)\s*$/i) || [])[1]).filter(Boolean).map(s => s.replace(/\s/g, '')).join('/');
+
+// Среднее вершин; для вогнутого дома выбираем внутреннюю точку с запасом до стен.
+function centroid(ring) {
+  const v = ring.slice(0, -1);
+  const mean = [v.reduce((s, c) => s + c[0], 0) / v.length, v.reduce((s, c) => s + c[1], 0) / v.length];
+  if (inside(mean, ring)) return mean;
+  const ys = [...new Set(v.map(c => c[1]))].sort((a, b) => a - b);
+  let best = mean, clearance = -1;
+  for (let k = 1; k < ys.length; k++) {
+    const y = (ys[k - 1] + ys[k]) / 2, xs = [];
+    for (let i = 1; i < ring.length; i++) {
+      const [ax, ay] = ring[i - 1], [bx, by] = ring[i];
+      if ((ay > y) !== (by > y)) xs.push(ax + (y - ay) * (bx - ax) / (by - ay));
+    }
+    xs.sort((a, b) => a - b);
+    for (let j = 1; j < xs.length; j += 2) {
+      const c = [(xs[j - 1] + xs[j]) / 2, y], d = distM(c, ring);
+      if (d > clearance && inside(c, ring)) { best = c; clearance = d; }
+    }
+  }
+  return best;
+}
+
+// self-check
+console.assert(bounds({features: [{geometry: {coordinates: [[[1, 2], [3, 4]]]}}]}).toArray().join() === '1,2,3,4', 'bounds');
+console.assert(JSON.stringify(parseCSV('a,b\r\n"x, ""y""",2\n')) === '[{"a":"x, \\"y\\"","b":"2"}]', 'parseCSV');
+console.assert(norm(' Р5 ') === 'p5' && norm('barnaul-р1') === 'barnaul-p1', 'norm');
+console.assert(houseNum('Г. Исакова 206а') === '206а' && houseNum('Островского 21/Г.Исакова 228 (мин.п.№2,6,7,8)') === '21/228' &&
+  houseNum('Юрина 257/ Островского 13') === '257/13' && houseNum('Малахова 48/ Юрина 227') === '48/227' && houseNum('Юрина 253') === '253' &&
+  houseNum('') === '', 'houseNum');
+console.assert(centroid([[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]).join() === '1,1', 'centroid');
+console.assert(houseNum('Анатолия 90,к.1') === '90к1' && houseNum('Кащеевой 17к1') === '17к1', 'houseNum corpus');
+console.assert(inside([1, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]) && !inside([3, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]), 'inside');
+console.assert(Math.abs(distM([1.00001, 0.5], [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]) - 1.1132) < 0.01, 'distM');
+
+if (!/^[a-z0-9-]+$/.test(p)) {
+  msg('Не указан периметр: добавьте ?p=имя в адрес, например ?p=p5');
+} else {
+  const map = new maplibregl.Map({ container: 'map', style: STYLE, center: [83.7, 53.35], zoom: 11,
+                                   cooperativeGestures: true });  // в iframe колесо не крадёт прокрутку страницы
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+  Promise.all([fetch(p + '.geojson').then(r => { if (!r.ok) throw r.status; return r.json(); }),
+               fetch(CSV).then(r => { if (!r.ok) throw 'csv'; return r.text(); }).then(parseCSV),
+               new Promise(ok => map.on('load', ok))])
+    .then(([gj, rows]) => {
+      const { area, marks, labels } = apply(gj, rows);
+      // 3D-здания рисуются в перспективе и «уезжают» от плашек — вместо них плоские 2D-дома на всех масштабах
+      for (const l of map.getStyle().layers) if (l.type === 'fill-extrusion') map.setLayoutProperty(l.id, 'visibility', 'none');
+      if (map.getLayer('building')) {
+        map.setLayerZoomRange('building', 13, 24);
+        map.setPaintProperty('building', 'fill-outline-color', 'hsl(35,6%,79%)');
+      }
+      map.addSource('area', { type: 'geojson', data: area });
+      map.addSource('marks', { type: 'geojson', data: marks });
+      map.addLayer({ id: 'fill', type: 'fill', source: 'area',
+        paint: { 'fill-color': ['get', 'fill'], 'fill-opacity': ['coalesce', ['get', 'fill_opacity'], 0.6] } });
+      map.addLayer({ id: 'line', type: 'line', source: 'area', filter: ['>', ['coalesce', ['get', 'stroke_width'], 0], 0],
+        paint: { 'line-color': ['get', 'stroke'], 'line-width': ['coalesce', ['get', 'stroke_width'], 0] } });
+      map.addLayer({ id: 'marks', type: 'circle', source: 'marks',
+        paint: { 'circle-radius': 7, 'circle-color': '#e6761b', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      map.addSource('labels', { type: 'geojson', data: labels });
+      map.addLayer({ id: 'labels', type: 'symbol', source: 'labels',
+        layout: { 'text-field': ['get', 'num'], 'text-font': ['Noto Sans Bold'], 'text-allow-overlap': true,
+                  'text-size': ['interpolate', ['linear'], ['zoom'], 13, 9, 16, 13, 19, 18] },
+        paint: { 'text-color': '#222', 'text-halo-color': '#fff', 'text-halo-width': 1.5 } });
+      map.fitBounds(bounds(gj), { padding: 30, duration: 0 });
+    })
+    .catch(e => msg(e === 404 ? 'Карта «' + p + '» не найдена'
+                  : e === 'csv' ? 'Не удалось загрузить список домов, обновите страницу'
+                  : 'Не удалось загрузить карту, обновите страницу'));
+}
+</script>
+</body>
+</html>
